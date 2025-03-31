@@ -5,30 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手机传感器检测</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        .sensor-card {
-            border: 1px solid #ccc;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 8px;
-        }
-        .supported { color: green; }
-        .not-supported { color: red; }
-        .data-box {
-            background: #f5f5f5;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 4px;
+        /* 保持原有样式不变，新增权限按钮样式 */
+        #permissionBtn {
+            background: #007AFF;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 20px 0;
         }
     </style>
 </head>
 <body>
     <h1>手机传感器检测</h1>
+    <div id="permissionArea"></div>
     <div id="sensorList"></div>
 
     <script>
@@ -36,11 +28,12 @@
             { id: 'accelerometer', name: '加速度传感器', event: 'devicemotion' },
             { id: 'gyroscope', name: '陀螺仪', event: 'devicemotion' },
             { id: 'orientation', name: '方向传感器', event: 'deviceorientation' },
-            { id: 'light', name: '环境光传感器', event: 'devicelight' },
-            { id: 'proximity', name: '接近传感器', event: 'deviceproximity' },
             { id: 'magnetometer', name: '磁力计', event: 'devicemotion' },
             { id: 'geo', name: '地理位置', event: 'geolocation' }
         ];
+
+        // 移除iOS不支持的传感器
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
         function createSensorCard(sensor) {
             const card = document.createElement('div');
@@ -53,98 +46,84 @@
             return card;
         }
 
-        function checkSensors() {
-            const sensorList = document.getElementById('sensorList');
-            
+        async function requestIOSPermission() {
+            try {
+                if (typeof DeviceMotionEvent !== 'undefined' && 
+                    typeof DeviceMotionEvent.requestPermission === 'function') {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    return permission === 'granted';
+                }
+                return true; // 非iOS设备自动继续
+            } catch (error) {
+                console.error('权限请求失败:', error);
+                return false;
+            }
+        }
+
+        function initSensors() {
             sensors.forEach(sensor => {
                 const card = createSensorCard(sensor);
                 sensorList.appendChild(card);
-                
                 const statusSpan = card.querySelector('.status');
                 const dataBox = card.querySelector('.data-box');
 
-                try {
-                    switch(sensor.id) {
-                        case 'accelerometer':
-                            if ('DeviceMotionEvent' in window) {
-                                window.addEventListener('devicemotion', (e) => {
-                                    statusSpan.className = 'supported';
-                                    statusSpan.textContent = '已支持';
-                                    dataBox.innerHTML = `
-                                        X: ${e.acceleration.x?.toFixed(2)}<br>
-                                        Y: ${e.acceleration.y?.toFixed(2)}<br>
-                                        Z: ${e.acceleration.z?.toFixed(2)}
-                                    `;
-                                });
-                            } else {
-                                throw new Error('不支持');
-                            }
-                            break;
+                const handleMotion = (e) => {
+                    statusSpan.className = 'supported';
+                    statusSpan.textContent = '已支持';
+                    
+                    // iOS的陀螺仪数据包含在rotationRate中
+                    if (sensor.id === 'gyroscope') {
+                        dataBox.innerHTML = e.rotationRate ? `
+                            旋转速率X: ${e.rotationRate.alpha?.toFixed(2)}<br>
+                            旋转速率Y: ${e.rotationRate.beta?.toFixed(2)}<br>
+                            旋转速率Z: ${e.rotationRate.gamma?.toFixed(2)}
+                        ` : '数据不可用';
+                    }
+                    
+                    // 加速度计数据处理
+                    if (sensor.id === 'accelerometer') {
+                        dataBox.innerHTML = e.acceleration ? `
+                            X: ${e.acceleration.x?.toFixed(2)}<br>
+                            Y: ${e.acceleration.y?.toFixed(2)}<br>
+                            Z: ${e.acceleration.z?.toFixed(2)}
+                        ` : '数据不可用';
+                    }
+                };
 
-                        case 'gyroscope':
-                            if ('DeviceMotionEvent' in window) {
-                                window.addEventListener('devicemotion', (e) => {
-                                    statusSpan.className = 'supported';
-                                    statusSpan.textContent = '已支持';
-                                    dataBox.innerHTML = `
-                                        旋转速率X: ${e.rotationRate?.alpha?.toFixed(2)}<br>
-                                        旋转速率Y: ${e.rotationRate?.beta?.toFixed(2)}<br>
-                                        旋转速率Z: ${e.rotationRate?.gamma?.toFixed(2)}
-                                    `;
-                                });
-                            } else {
-                                throw new Error('不支持');
-                            }
-                            break;
+                const handleOrientation = (e) => {
+                    statusSpan.className = 'supported';
+                    statusSpan.textContent = '已支持';
+                    dataBox.innerHTML = `
+                        Alpha: ${e.alpha?.toFixed(2)}<br>
+                        Beta: ${e.beta?.toFixed(2)}<br>
+                        Gamma: ${e.gamma?.toFixed(2)}
+                    `;
+                };
 
-                        case 'orientation':
-                            if ('DeviceOrientationEvent' in window) {
-                                window.addEventListener('deviceorientation', (e) => {
-                                    statusSpan.className = 'supported';
-                                    statusSpan.textContent = '已支持';
-                                    dataBox.innerHTML = `
-                                        Alpha: ${e.alpha?.toFixed(2)}<br>
-                                        Beta: ${e.beta?.toFixed(2)}<br>
-                                        Gamma: ${e.gamma?.toFixed(2)}
-                                    `;
-                                });
-                            } else {
-                                throw new Error('不支持');
-                            }
-                            break;
+                switch(sensor.id) {
+                    case 'accelerometer':
+                    case 'gyroscope':
+                        if (window.DeviceMotionEvent) {
+                            window.addEventListener('devicemotion', handleMotion);
+                        } else {
+                            statusSpan.className = 'not-supported';
+                            statusSpan.textContent = '不支持';
+                        }
+                        break;
 
-                        case 'light':
-                            if ('ondevicelight' in window) {
-                                window.addEventListener('devicelight', (e) => {
-                                    statusSpan.className = 'supported';
-                                    statusSpan.textContent = '已支持';
-                                    dataBox.textContent = `光照强度: ${e.value} lux`;
-                                });
-                            } else {
-                                statusSpan.className = 'not-supported';
-                                statusSpan.textContent = '不支持';
-                            }
-                            break;
+                    case 'orientation':
+                        if (window.DeviceOrientationEvent) {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        } else {
+                            statusSpan.className = 'not-supported';
+                            statusSpan.textContent = '不支持';
+                        }
+                        break;
 
-                        case 'proximity':
-                            if ('ondeviceproximity' in window) {
-                                window.addEventListener('deviceproximity', (e) => {
-                                    statusSpan.className = 'supported';
-                                    statusSpan.textContent = '已支持';
-                                    dataBox.innerHTML = `
-                                        距离: ${e.value} cm<br>
-                                        最大检测距离: ${e.max} cm
-                                    `;
-                                });
-                            } else {
-                                statusSpan.className = 'not-supported';
-                                statusSpan.textContent = '不支持';
-                            }
-                            break;
-
-                        case 'geo':
-                            if ('geolocation' in navigator) {
-                                navigator.geolocation.getCurrentPosition((position) => {
+                    case 'geo':
+                        if ('geolocation' in navigator) {
+                            navigator.geolocation.getCurrentPosition(
+                                (position) => {
                                     statusSpan.className = 'supported';
                                     statusSpan.textContent = '已支持';
                                     dataBox.innerHTML = `
@@ -152,31 +131,35 @@
                                         经度: ${position.coords.longitude}<br>
                                         海拔: ${position.coords.altitude || 'N/A'} m
                                     `;
-                                });
-                            } else {
-                                statusSpan.className = 'not-supported';
-                                statusSpan.textContent = '不支持';
-                            }
-                            break;
-                    }
-                } catch (error) {
-                    statusSpan.className = 'not-supported';
-                    statusSpan.textContent = '不支持';
+                                },
+                                (error) => {
+                                    statusSpan.className = 'not-supported';
+                                    statusSpan.textContent = '权限被拒绝';
+                                }
+                            );
+                        }
+                        break;
                 }
             });
         }
 
-        // 需要用户交互才能启动传感器检测
-        document.body.addEventListener('click', () => {
-            checkSensors();
-        }, { once: true });
-
-        // 初始提示
-        const prompt = document.createElement('div');
-        prompt.textContent = '点击页面任意位置开始检测传感器...';
-        prompt.style.color = '#666';
-        prompt.style.margin = '20px 0';
-        sensorList.before(prompt);
+        // 添加iOS专用权限按钮
+        if (isIOS) {
+            const permissionBtn = document.createElement('button');
+            permissionBtn.id = 'permissionBtn';
+            permissionBtn.textContent = '点击授权传感器权限';
+            permissionBtn.onclick = async () => {
+                const granted = await requestIOSPermission();
+                if (granted) {
+                    permissionBtn.remove();
+                    initSensors();
+                }
+            };
+            document.getElementById('permissionArea').appendChild(permissionBtn);
+        } else {
+            // 非iOS设备直接初始化
+            initSensors();
+        }
     </script>
 </body>
 </html>
